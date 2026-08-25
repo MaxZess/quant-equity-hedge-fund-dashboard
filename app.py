@@ -2,10 +2,11 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import plotly.express as px
 
-# ======================================
+# ==================================================
 # PAGE CONFIG
-# ======================================
+# ==================================================
 
 st.set_page_config(
     page_title="Max Zessinger Quant Lab",
@@ -13,9 +14,9 @@ st.set_page_config(
     layout="wide"
 )
 
-# ======================================
-# CUSTOM CSS
-# ======================================
+# ==================================================
+# DESIGN
+# ==================================================
 
 st.markdown("""
 <style>
@@ -31,38 +32,34 @@ h1,h2,h3{
 [data-testid="metric-container"]{
     background-color:#1B2430;
     border:1px solid #2D3748;
-    padding:15px;
     border-radius:12px;
+    padding:15px;
 }
 
 </style>
 """, unsafe_allow_html=True)
 
-# ======================================
+# ==================================================
 # HEADER
-# ======================================
+# ==================================================
 
 st.title("🚀 Max Zessinger Quant Lab")
 
 st.caption(
-    "Portfolio Optimization | Risk Analytics | Quantitative Finance"
+    "Portfolio Optimization • Risk Analytics • Quantitative Finance"
 )
 
-# ======================================
+# ==================================================
 # SIDEBAR
-# ======================================
+# ==================================================
 
 st.sidebar.title("Dashboard Settings")
 
 start_year = st.sidebar.slider(
-    "Analyse ab Jahr",
+    "Start Year",
     2018,
     2025,
     2020
-)
-
-st.sidebar.success(
-    "Created by Maximilian Zessinger"
 )
 
 tickers = st.sidebar.multiselect(
@@ -74,8 +71,8 @@ tickers = st.sidebar.multiselect(
         "AMZN",
         "GOOGL",
         "META",
-        "JPM",
         "TSLA",
+        "JPM",
         "V",
         "NFLX"
     ],
@@ -88,9 +85,21 @@ tickers = st.sidebar.multiselect(
     ]
 )
 
-# ======================================
+st.sidebar.success(
+    "Created by Maximilian Zessinger"
+)
+
+# ==================================================
+# CHECK
+# ==================================================
+
+if len(tickers) < 2:
+    st.warning("Please select at least 2 stocks.")
+    st.stop()
+
+# ==================================================
 # DATA
-# ======================================
+# ==================================================
 
 data = yf.download(
     tickers,
@@ -99,6 +108,10 @@ data = yf.download(
 )["Close"]
 
 returns = data.pct_change().dropna()
+
+# ==================================================
+# BASIC METRICS
+# ==================================================
 
 portfolio_returns = returns.mean(axis=1)
 
@@ -111,9 +124,14 @@ annual_volatility = (
 
 sharpe_ratio = annual_return / annual_volatility
 
-# ======================================
+quant_score = max(
+    0,
+    min(sharpe_ratio * 50, 100)
+)
+
+# ==================================================
 # TOP KPIs
-# ======================================
+# ==================================================
 
 col1, col2, col3, col4 = st.columns(4)
 
@@ -132,83 +150,73 @@ col3.metric(
     f"{sharpe_ratio:.2f}"
 )
 
-quant_score = sharpe_ratio * 50
-
 col4.metric(
     "Quant Score",
     f"{quant_score:.1f}/100"
 )
 
-# ======================================
-# STOCK PRICE CHART
-# ======================================
+# ==================================================
+# CHARTS
+# ==================================================
 
 st.subheader("📈 Stock Prices")
-
 st.line_chart(data)
 
-# ======================================
-# DAILY RETURNS
-# ======================================
-
 st.subheader("📊 Daily Returns")
-
 st.line_chart(returns)
 
-# ======================================
-# PORTFOLIO STATISTICS
-# ======================================
+# ==================================================
+# PORTFOLIO
+# ==================================================
 
-weights = np.ones(len(tickers))
-weights = weights / len(tickers)
-portfolio_df = pd.DataFrame({
-    "Ticker": tickers,
-    "Weight (%)": weights * 100
-})
+num_assets = len(tickers)
 
-mean_returns = returns.mean() * 252
-cov_matrix = returns.cov() * 252
+weights = np.repeat(
+    1 / num_assets,
+    num_assets
+)
+
+mean_returns_series = returns.mean() * 252
+
+mean_returns = mean_returns_series.values
+
+cov_matrix = (
+    returns.cov().values
+    * 252
+)
 
 portfolio_return = np.sum(
     weights * mean_returns
 )
 
 portfolio_risk = np.sqrt(
-    np.dot(
-        weights.T,
-        np.dot(
-            cov_matrix,
-            weights
-        )
-    )
+    weights.T
+    @ cov_matrix
+    @ weights
 )
 
 st.subheader("💼 Portfolio Statistics")
 
-stat1, stat2 = st.columns(2)
+c1, c2 = st.columns(2)
 
-stat1.metric(
+c1.metric(
     "Expected Portfolio Return",
     f"{portfolio_return:.2%}"
 )
 
-stat2.metric(
+c2.metric(
     "Expected Portfolio Risk",
     f"{portfolio_risk:.2%}"
 )
 
-# ======================================
-# VAR
-# ======================================
+# ==================================================
+# RISK
+# ==================================================
 
-var_95 = np.percentile(
+var95 = np.percentile(
     portfolio_returns,
     5
 )
-
-# ======================================
-# MAX DRAWDOWN
-# ======================================
 
 cumulative = (
     1 + portfolio_returns
@@ -222,21 +230,21 @@ drawdown = (
 
 max_drawdown = drawdown.min()
 
-risk1, risk2 = st.columns(2)
+r1, r2 = st.columns(2)
 
-risk1.metric(
+r1.metric(
     "Value at Risk (95%)",
-    f"{var_95:.2%}"
+    f"{var95:.2%}"
 )
 
-risk2.metric(
+r2.metric(
     "Maximum Drawdown",
     f"{max_drawdown:.2%}"
 )
 
-# ======================================
+# ==================================================
 # MONTE CARLO
-# ======================================
+# ==================================================
 
 st.subheader("🎯 Monte Carlo Portfolio Simulation")
 
@@ -246,24 +254,15 @@ sharpe_list = []
 
 for _ in range(5000):
 
-    w = np.random.random(
-        len(tickers)
-    )
+    w = np.random.random(num_assets)
+    w = w / np.sum(w)
 
-    w /= np.sum(w)
-
-    ret = np.sum(
-        mean_returns * w
-    )
+    ret = np.sum(w * mean_returns)
 
     risk = np.sqrt(
-        np.dot(
-            w.T,
-            np.dot(
-                cov_matrix,
-                w
-            )
-        )
+        w.T
+        @ cov_matrix
+        @ w
     )
 
     sharpe = ret / risk
@@ -278,85 +277,95 @@ simulation_df = pd.DataFrame({
     "Sharpe": sharpe_list
 })
 
-st.scatter_chart(
+fig = px.scatter(
     simulation_df,
     x="Risk",
-    y="Return"
+    y="Return",
+    color="Sharpe",
+    color_continuous_scale="Viridis",
+    title="Efficient Frontier Simulation"
 )
 
-# ======================================
-# BEST PORTFOLIO
-# ======================================
+st.plotly_chart(
+    fig,
+    width="stretch"
+)
 
-best_index = simulation_df[
-    "Sharpe"
-].idxmax()
+# ==================================================
+# BEST PORTFOLIO
+# ==================================================
+
+best_index = simulation_df["Sharpe"].idxmax()
 
 best_portfolio = simulation_df.loc[
     best_index
 ]
 
-st.subheader("🏆 Best Portfolio Found")
+st.subheader("🏆 Best Portfolio")
 
 st.dataframe(
     pd.DataFrame(best_portfolio).T,
-    use_container_width=True
+    width="stretch"
 )
 
-# ======================================
+# ==================================================
 # TOP STOCK
-# ======================================
+# ==================================================
 
-best_stock = mean_returns.idxmax()
+best_stock = mean_returns_series.idxmax()
 
 st.success(
     f"Top Performing Stock: {best_stock}"
 )
 
-# ======================================
+# ==================================================
 # ALLOCATION
-# ======================================
+# ==================================================
 
 portfolio_df = pd.DataFrame({
     "Ticker": tickers,
-    "Weight (%)": weights * 100
+    "Weight (%)": np.round(
+        weights * 100,
+        2
+    )
 })
 
 st.subheader("📋 Portfolio Allocation")
 
 st.dataframe(
     portfolio_df,
-    use_container_width=True
+    width="stretch"
 )
 
-# ======================================
-# FOOTER
-# ======================================
-
-st.markdown("---")
-
-st.markdown(
-    "### 🔬 Research Summary"
-)
-
-st.write(
-    "This dashboard analyzes equity performance, portfolio risk, "
-    "Monte Carlo simulations, Value at Risk (VaR), Maximum Drawdown "
-    "and portfolio allocation across major US technology stocks."
-)
-import plotly.express as px
+# ==================================================
+# CORRELATION
+# ==================================================
 
 st.subheader("🔥 Correlation Matrix")
 
 corr = returns.corr()
 
-fig = px.imshow(
+corr_fig = px.imshow(
     corr,
     text_auto=True,
     color_continuous_scale="RdBu_r"
 )
 
 st.plotly_chart(
-    fig,
-    use_container_width=True
+    corr_fig,
+    width="stretch"
+)
+
+# ==================================================
+# FOOTER
+# ==================================================
+
+st.markdown("---")
+
+st.markdown("### 🔬 Research Summary")
+
+st.write(
+    "Professional quantitative equity research dashboard featuring "
+    "portfolio analytics, Monte Carlo simulation, Sharpe Ratio analysis, "
+    "Value at Risk, Maximum Drawdown and correlation analysis."
 )
